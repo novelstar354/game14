@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>究極ポーカー - 最強版</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<style>
+html, body{margin:0;padding:0;width:100%;height:100%;background:radial-gradient(#003300,#000);color:white;font-family:sans-serif;}
+body{text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;}
+h1{color:gold;margin:8px;}
+.area{border:2px solid #fff;border-radius:12px;margin:6px;padding:8px;position:relative;width:90%;max-width:500px;}
+.cards{font-size:calc(3vw + 10px);letter-spacing:calc(1vw);}
+button{padding:12px 16px;margin:4px;font-size:calc(2vw + 8px);border-radius:8px;border:none;background:gold;min-width:60px;}
+button:disabled{background:gray;}
+select{font-size:calc(2vw + 8px);margin-right:8px;}
+#allin{font-size:calc(6vw + 20px);color:red;position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);animation:flash 0.5s infinite alternate;display:none;z-index:10;}
+@keyframes flash{from{opacity:1;}to{opacity:0.2;}}
+.chipMove{position:absolute;width:calc(5vw);height:calc(5vw);background:gold;border-radius:50%;top:0;left:0;animation:move 0.5s forwards;z-index:5;}
+@keyframes move{to{top:50%;left:50%;transform:translate(-50%,-50%);}}
+.firework{
+  position:absolute;
+  width:10px; height:10px;
+  border-radius:50%;
+  background:yellow;
+  animation:fw 1s ease-out forwards;
+}
+@keyframes fw{
+  0%{opacity:1; transform:translate(0,0) scale(1);}
+  100%{opacity:0; transform:translate(calc(var(--x) * 1px), calc(var(--y) * 1px)) scale(2);}
+}
+</style>
+</head>
+<body>
+
+<h1>🏆 究極ポーカー 最強版</h1>
+
+<div class="area">
+人数:
+<select id="players">
+<option value="2">2人</option>
+<option value="3">3人</option>
+<option value="4">4人</option>
+</select>
+CPU難易度:
+<select id="difficulty">
+<option value="easy">Easy</option>
+<option value="normal" selected>Normal</option>
+<option value="hard">Hard</option>
+<option value="mad">MAD</option>
+</select>
+</div>
+
+<div class="area">
+<button onclick="startTournament()">開始</button>
+<button onclick="saveGame()">セーブ</button>
+<button onclick="loadGame()">ロード</button>
+<button onclick="deleteSave()">削除</button>
+</div>
+
+<div id="table"></div>
+<div class="area" id="board">- - - - -</div>
+
+<div class="area">
+<button onclick="check()">チェック</button>
+<button onclick="bet()">ベット</button>
+<button onclick="fold()">フォールド</button>
+</div>
+
+<div class="area" id="log"></div>
+<div id="allin"></div>
+
+<script>
+const suits=["♠","♥","♦","♣"];
+const nums=["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
+let players=[],board=[],deck=[],pot=0,stage=0;
+let difficulty="normal";
+let tournamentQueue=[],currentMatch=[];
+
+// =================== 初期化 ===================
+function startTournament(){
+  let pcount=+document.getElementById("players").value;
+  difficulty=document.getElementById("difficulty").value;
+  deck=[];
+  for(let s of suits) for(let n of nums) deck.push(n+s);
+  deck.sort(()=>Math.random()-0.5);
+
+  players=[];
+  for(let i=0;i<pcount;i++){
+    players.push({name:i===0?"あなた":"CPU"+i,hand:[],chips:1000,fold:false});
+  }
+  tournamentQueue=[...players];
+  nextTournamentRound();
+}
+
+// =================== トーナメントラウンド ===================
+function nextTournamentRound(){
+  if(tournamentQueue.length<2){
+    log("🏆 トーナメント優勝: "+tournamentQueue[0].name);
+    draw();
+    showFireworks();
+    return;
+  }
+  currentMatch=[tournamentQueue.shift(),tournamentQueue.shift()];
+  currentMatch.forEach(p=>{p.hand=[]; p.fold=false;});
+  board=[]; pot=0; stage=0;
+  dealCardsAnimated();
+}
+
+// =================== カード配布アニメ ===================
+function dealCardsAnimated(){
+  let idx=0;
+  function dealNext(){
+    if(idx>=currentMatch.length*2){
+      draw(); log("カード配布完了");
+      return;
+    }
+    let p=currentMatch[Math.floor(idx/2)];
+    p.hand.push(deck.pop());
+    draw();
+    idx++;
+    setTimeout(dealNext,300);
+  }
+  dealNext();
+}
+
+// =================== UI ===================
+function draw(){
+  let t="";
+  currentMatch.forEach((p,i)=>{
+    t+=`<div class="area"><b>${p.name}</b><br>`;
+    t+=`🃏 ${i===0||stage>=4?p.hand.join(" "):"🂠 🂠"}<br>`;
+    t+=`💰 ${p.chips}</div>`;
+  });
+  document.getElementById("table").innerHTML=t;
+  document.getElementById("board").textContent=board.length?board.join(" "):"- - - - -";
+}
+
+// =================== 役判定 ===================
+function evalHand(cards){
+  const vmap={"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"10":10,"J":11,"Q":12,"K":13,"A":14};
+  let vals=cards.map(c=>vmap[c.slice(0,-1)]);
+  let suitsArr=cards.map(c=>c.slice(-1));
+  let counts={};
+  vals.forEach(v=>counts[v]=(counts[v]||0)+1);
+  let countsArr=Object.entries(counts).sort((a,b)=>b[1]-a[1]||b[0]-a[0]);
+  let uniq=[...new Set(vals)].sort((a,b)=>b-a);
+  if(uniq.includes(14)) uniq.push(1);
+  let straight=0;
+  for(let i=0;i<=uniq.length-5;i++){
+    if(uniq[i]-uniq[i+4]==4){ straight=uniq[i]; break; }
+  }
+  let flushSuit = suitsArr.find(s=>suitsArr.filter(x=>x===s).length>=5);
+  let flushCards = flushSuit?cards.filter(c=>c.endsWith(flushSuit)).map(c=>vmap[c.slice(0,-1)]).sort((a,b)=>b-a):[];
+  if(straight && flushSuit && flushCards.includes(straight)) return {rank:9,kick:[straight],name:"ストレートフラッシュ"};
+  if(countsArr[0][1]==4) return {rank:8,kick:[+countsArr[0][0]],name:"フォーカード"};
+  if(countsArr[0][1]==3 && countsArr[1][1]==2) return {rank:7,kick:[+countsArr[0][0],+countsArr[1][0]],name:"フルハウス"};
+  if(flushSuit) return {rank:6,kick:flushCards.slice(0,5),name:"フラッシュ"};
+  if(straight) return {rank:5,kick:[straight],name:"ストレート"};
+  if(countsArr[0][1]==3) return {rank:4,kick:[+countsArr[0][0]],name:"スリーカード"};
+  if(countsArr[0][1]==2 && countsArr[1][1]==2) return {rank:3,kick:[+countsArr[0][0],+countsArr[1][0]],name:"ツーペア"};
+  if(countsArr[0][1]==2) return {rank:2,kick:[+countsArr[0][0]],name:"ワンペア"};
+  return {rank:1,kick:uniq.slice(0,5),name:"ハイカード"};
+}
+
+// =================== 勝敗比較 ===================
+function compare(a,b){
+  if(a.rank!==b.rank) return a.rank-b.rank;
+  for(let i=0;i<a.kick.length;i++){if(a.kick[i]!==b.kick[i])return a.kick[i]-b.kick[i];}
+  return 0;
+}
+
+// =================== ゲーム進行 ===================
+function nextStage(){
+  if(stage===0) board.push(deck.pop(),deck.pop(),deck.pop());
+  else if(stage<3) board.push(deck.pop());
+  stage++;
+  draw();
+  if(stage>=4) showdown();
+}
+
+function check(){ cpuTurn(); }
+function bet(){ animateChip(); currentMatch[0].chips-=100; pot+=100; cpuTurn(); }
+function fold(){ log("あなたがフォールド"); currentMatch[1].chips+=pot; pot=0; nextTournamentRound(); }
+
+// =================== CPU ===================
+function cpuTurn(){
+  let p=currentMatch[1];
+  let power=evalHand(p.hand.concat(board)).rank;
+  if(difficulty==="mad" && power>=6){ showAllIn(); p.chips+=pot; pot=0; }
+  nextStage();
+}
+
+// =================== アニメ ===================
+function animateChip(){let chip=document.createElement("div");chip.className="chipMove";document.body.appendChild(chip);setTimeout(()=>chip.remove(),500);}
+function showAllIn(){let e=document.getElementById("allin"); e.style.display="block";setTimeout(()=>e.style.display="none",1500);}
+
+// =================== 勝利演出 ===================
+function showFireworks(){
+  for(let i=0;i<30;i++){
+    let f=document.createElement("div");
+    f.className="firework";
+    f.style.setProperty("--x",(Math.random()-0.5)*500);
+    f.style.setProperty("--y",(Math.random()-0.5)*500);
+    document.body.appendChild(f);
+    setTimeout(()=>f.remove(),1000);
+  }
+}
+
+// =================== ショーダウン ===================
+function showdown(){
+  let results=currentMatch.map(p=>({p,hand:evalHand(p.hand.concat(board))}));
+  results.sort((a,b)=>compare(b.hand,a.hand));
+  let win=results[0]; win.p.chips+=pot;
+  log("勝者: "+win.p.name+" ("+win.hand.name+")");
+  pot=0;
+  tournamentQueue.push(win.p);
+  setTimeout(nextTournamentRound,1000);
+}
+
+// =================== ログ ===================
+function log(t){ document.getElementById("log").textContent=t; }
+
+// =================== セーブ ===================
+function saveGame(){ localStorage.setItem("pokerSave",JSON.stringify({players,board,deck,pot,stage,tournamentQueue,currentMatch})); log("セーブ完了"); }
+function loadGame(){ let d=localStorage.getItem("pokerSave"); if(!d)return; let s=JSON.parse(d); players=s.players; board=s.board; deck=s.deck; pot=s.pot; stage=s.stage; tournamentQueue=s.tournamentQueue; currentMatch=s.currentMatch; draw(); log("ロード完了"); }
+function deleteSave(){ localStorage.removeItem("pokerSave"); log("セーブ削除"); }
+</script>
+</body>
+</html>
